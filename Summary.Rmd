@@ -1,0 +1,185 @@
+---
+title: "Milestone Report"
+author: "Leon"
+date: "Saturday, July 18, 2015"
+output: html_document
+---
+
+# Executive Summary
+
+The object of the project is to build a NLP model to predict the next word given an input word /sentence fragment.
+
+The data explorations perform on text from three sources, Twitter, Blogs and News shows a high level of stop words. While it is relatively easy to remove stop words from the datasources, this will break the english structure and end up with wrong prediction. We should attempt to downsample the stop words.
+
+From the bi-gram and tri-gram histrogram, we notice words like "it s" "i don t" "it s a" "i can t". These are results of apostrophe being remove when we remove punctuation from the data set. We would want to consider retaining the apostrophe.
+
+We also see from the n-grams analysis that each gram reduces the frequency by slightly more than 10 times, from the highest frequenct at 88,000 with uni-gram to about 8,400 wih bi-gram to 700 with tri-gram. We would assume the highest frequenc with quad-gram at 60. We would only use up to tri-gram for most benefiting.
+
+# Introduction
+
+The data for this project were downloaded from:
+[https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip](https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip)
+
+This report explore the collection of text from three sources, Twitter, Blogs and News.
+
+The report explain only the major features of the data analysed and briefly summarised the plans for creating the prediction algorithm used in the final Shiny app.
+
+# Data Exploration
+
+Using linux 'wc' command, we obtain a basic summary of the three different sources.
+
+|                    |       |      Blog |      News |   Twitter |
+|--------------------|-------|----------:|----------:|----------:|
+| Total Characters   | wc -m | 208623081 | 205243643 | 166816544 |
+| Total Words        | wc -w |  37334114 |  34365936 |  30359804 |
+| Total Lines        | wc -l |    899288 |   1010242 |   2360148 |
+| Max line length    | wc -L |     40833 |     11384 |       173 |
+|                    |       |           |           |           |
+
+# Data Cleansing Consideration
+
+A total of 4,269,678 data records were available from the dataset. As the application is design for small device, we must consider the available resources when building the model. During data cleansing, we would  remove all records containing the following as partial removal would make the sentence structure meaningless. Linux commands were used to filter out the unwanted records.
+
+# Data Cleansing 1
+
+We will use linux command to clean up the data source.
+
+1. Extract only printable characters
+```
+tr -cd '[:print:]\n' < en_US.blogs.txt > en_US.blogs.1.txt
+tr -cd '[:print:]\n' < en_US.news.txt > en_US.news.1.txt
+tr -cd '[:print:]\n' < en_US.twitter.txt > en_US.twitter.1.txt
+```
+2. Convert to lowercase
+```
+tr A-Z a-z < en_US.blogs.1.txt > en_US.blogs.2.txt
+tr A-Z a-z < en_US.news.1.txt > en_US.news.2.txt
+tr A-Z a-z < en_US.twitter.1.txt > en_US.twitter.2.txt
+```
+3. Remove all single word records (records without space)
+```
+grep " " en_US.blogs.2.txt > en_US.blogs.3.txt
+grep " " en_US.news.2.txt > en_US.news.3.txt
+grep " " en_US.twitter.2.txt > en_US.twitter.3.txt
+```
+4. Remove all records with FTP/HTTP references
+```
+grep -vE "(f|ht)tp[:/]?" en_US.blogs.3.txt > en_US.blogs.4.txt
+grep -vE "(f|ht)tp[:/]?" en_US.news.3.txt > en_US.news.4.txt
+grep -vE "(f|ht)tp[:/]?" en_US.twitter.3.txt > en_US.twitter.4.txt
+```
+5. Remove all records with Hashtags and twitter
+```
+grep -vE "(^| )(#|@)[a-z0-9]+" en_US.blogs.4.txt > en_US.blogs.5.txt
+grep -vE "(^| )(#|@)[a-z0-9]+" en_US.news.4.txt > en_US.news.5.txt
+grep -vE "(^| )(#|@)[a-z0-9]+" en_US.twitter.4.txt > en_US.twitter.5.txt
+```
+6. Replace all punctation with a space
+```
+tr -s [:punct:] ' ' < en_US.blogs.5.txt > en_US.blogs.6.txt
+tr -s [:punct:] ' ' < en_US.news.5.txt > en_US.news.6.txt
+tr -s [:punct:] ' ' < en_US.twitter.5.txt > en_US.twitter.6.txt
+```
+7. Replace all numeric with a space
+```
+tr -s [:digit:] ' ' < en_US.blogs.6.txt > en_US.blogs.7.txt
+tr -s [:digit:] ' ' < en_US.news.6.txt > en_US.news.7.txt
+tr -s [:digit:] ' ' < en_US.twitter.6.txt > en_US.twitter.7.txt
+```
+8. Remove all empty strings records and strip whitespaces
+```
+awk '$1=$1' en_US.blogs.7.txt > en_US.blogs.8.txt
+awk '$1=$1' en_US.news.7.txt > en_US.news.8.txt
+awk '$1=$1' en_US.twitter.7.txt > en_US.twitter.8.txt
+```
+
+After the round of cleansing, we have
+
+|                    |       |      Blog |      News |   Twitter |
+|--------------------|-------|----------:|----------:|----------:|
+| Total Characters   | wc -m | 198611883 | 194627586 | 138641713 |
+| Total Words        | wc -w |  37186666 |  34439601 |  27454162 |
+| Total Lines        | wc -l |    882348 |   1004197 |   2149834 |
+| Max line length    | wc -L |     39068 |      9709 |       140 |
+|                    |       |           |           |           |
+
+# Data Cleansing 2
+
+```{r setup, message=FALSE, include=FALSE}
+knitr::opts_chunk$set(cache=TRUE)
+
+#############################
+## Load required Libraries ##
+#############################
+# tm corpus
+library(tm)
+#ngrams
+library(RWeka)
+#wordcloud
+library(wordcloud)
+# plot
+library(ggplot2)
+```
+
+We will load random sample of records from each data set into R for next cleansing. A list of Profanity words for filtering were downloaded from [http://www.bannedwordlist.com/lists/swearWords.txt](http://www.bannedwordlist.com/lists/swearWords.txt) and remove from the data.
+
+```{r}
+size = 20000
+data = NULL
+
+set.seed(1)
+twitter = readLines("./data/en_US/en_US.twitter.8.txt")
+data = c(data, sample(twitter, size))
+rm(twitter) #clean up environment
+
+set.seed(1)
+news = readLines("./data/en_US/en_US.news.8.txt")
+data = c(data, sample(news, size))
+rm(news) #clean up environment
+
+set.seed(1)
+blogs = readLines("./data/en_US/en_US.blogs.8.txt")
+data = c(data, sample(blogs, size))
+rm(blogs) #clean up environment
+
+profanity = readLines("bannedwordlist.txt")
+data = replace(data, list = profanity, values = "")
+
+data = Corpus(VectorSource(data))
+```
+
+# Plot Word Cloud
+The word Cloud gives a high level representation of the top 100 words and we can see it is form largely of stop words.
+```{r}
+wordcloud(data, scale=c(5,1), max.words=100, random.order=FALSE, rot.per=0.35, use.r.layout=FALSE, colors=brewer.pal(8, "Dark2"))
+```
+
+# N-grams
+Analyse with N-grams
+```{r}
+sample_df=data.frame(text=unlist(sapply(data, '[',"content")),stringsAsFactors=F)
+token_delim=" \\t\\r\\n.!?,;\"()"
+UnigramTokenizer=NGramTokenizer(sample_df, Weka_control(min=1,max=1))
+BigramTokenizer=NGramTokenizer(sample_df, Weka_control(min=2,max=2, delimiters = token_delim))
+TrigramTokenizer=NGramTokenizer(sample_df, Weka_control(min=3,max=3, delimiters = token_delim))
+
+unigramTable=data.frame(table(UnigramTokenizer))
+bigramTable=data.frame(table(BigramTokenizer))
+trigramTable=data.frame(table(TrigramTokenizer))
+
+unigramTable=unigramTable[order(unigramTable$Freq,decreasing = TRUE),]
+bigramTable=bigramTable[order(bigramTable$Freq,decreasing = TRUE),]
+trigramTable=trigramTable[order(trigramTable$Freq,decreasing = TRUE),]
+```
+
+# Plot Histrogram
+
+We can see from the histrogram plot, at 3-grams, the frequency is relatively.
+
+```{r}
+ggplot(unigramTable[1:10,], aes(x=reorder(UnigramTokenizer,-Freq,sum),y=Freq), ) + geom_bar(stat="Identity") +geom_text(aes(label=Freq), vjust=-0.4)
+
+ggplot(bigramTable[1:10,], aes(x=reorder(BigramTokenizer,-Freq,sum),y=Freq), ) + geom_bar(stat="Identity") +geom_text(aes(label=Freq), vjust=-0.4)
+
+ggplot(trigramTable[1:10,], aes(x=reorder(TrigramTokenizer,-Freq,sum),y=Freq), ) + geom_bar(stat="Identity") +geom_text(aes(label=Freq), vjust=-0.4)
+```

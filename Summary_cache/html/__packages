@@ -1,0 +1,13 @@
+base
+NLP
+tm
+RWeka
+RColorBrewer
+wordcloud
+ggplot2
+SnowballC
+lsa
+foreach
+iterators
+snow
+doSNOW
